@@ -9,7 +9,7 @@ service cloud.firestore {
     function isApprovedUser() {
       return request.auth.token.email in [
         // Add approved emails here:
-        "REPLACE_WITH_YOUR_EMAIL@example.com"
+        "asmundg@gmail.com"
       ];
     }
 
