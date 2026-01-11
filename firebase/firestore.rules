@@ -1,0 +1,94 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper: Check if user is the parent of this family
+    function isParentOf(familyId) {
+      return isAuthenticated() &&
+             get(/databases/$(database)/documents/families/$(familyId)).data.parentEmail == request.auth.token.email;
+    }
+
+    // Helper: Check if request has valid device token for this device
+    function isDevice(deviceId) {
+      return isAuthenticated() &&
+             request.auth.token.deviceId == deviceId;
+    }
+
+    // Helper: Get family ID from a document
+    function getFamilyId(data) {
+      return data.familyId;
+    }
+
+    // Families - only parent can read/write
+    match /families/{familyId} {
+      allow read: if isParentOf(familyId);
+      allow create: if isAuthenticated() &&
+                       request.resource.data.parentEmail == request.auth.token.email;
+      allow update, delete: if isParentOf(familyId);
+    }
+
+    // Devices - parent can read/write, device can update its own status
+    match /devices/{deviceId} {
+      allow read: if isParentOf(resource.data.familyId) || isDevice(deviceId);
+      allow create: if isAuthenticated();
+      allow update: if isParentOf(resource.data.familyId) ||
+                       (isDevice(deviceId) && onlyUpdatingStatus());
+      allow delete: if isParentOf(resource.data.familyId);
+
+      // Devices can only update specific fields
+      function onlyUpdatingStatus() {
+        let allowed = ['currentApp', 'currentAppPackage', 'lastSeen', 'fcmToken'];
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowed);
+      }
+    }
+
+    // Users (children) - parent has full access, devices can read and update time
+    match /users/{userId} {
+      allow read: if isParentOf(resource.data.familyId) || isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isParentOf(resource.data.familyId) ||
+                       (isAuthenticated() && onlyUpdatingTime());
+      allow delete: if isParentOf(resource.data.familyId);
+
+      // Devices can only update time-related fields
+      function onlyUpdatingTime() {
+        let allowed = ['todayUsedMinutes', 'lastResetDate'];
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowed);
+      }
+    }
+
+    // Whitelist - parent can manage, anyone authenticated can read
+    match /whitelist/{itemId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isParentOf(resource.data.familyId) ||
+                                       isParentOf(request.resource.data.familyId);
+    }
+
+    // Extension requests - devices can create, parent can read/update
+    match /extensionRequests/{requestId} {
+      allow read: if isParentOf(resource.data.familyId) || isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isParentOf(resource.data.familyId) ||
+                       (isAuthenticated() && onlyMarkingProcessed());
+      allow delete: if isParentOf(resource.data.familyId);
+
+      // Devices can mark approved requests as processed
+      function onlyMarkingProcessed() {
+        return request.resource.data.status == 'processed' &&
+               resource.data.status == 'approved';
+      }
+    }
+
+    // Usage logs - devices can create, parent can read
+    match /usageLogs/{logId} {
+      allow read: if isParentOf(resource.data.familyId);
+      allow create: if isAuthenticated();
+      allow update, delete: if false; // Logs are immutable
+    }
+  }
+}

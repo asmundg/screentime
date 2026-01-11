@@ -42,6 +42,23 @@ uv run pytest tests/test_models.py             # Single file
 uv run pytest tests/test_models.py::test_name  # Single test
 ```
 
+### Firebase
+```bash
+cd firebase
+firebase login                    # Authenticate
+firebase use your-project-id      # Set project
+firebase deploy --only firestore  # Deploy rules & indexes
+firebase deploy --only functions  # Deploy Cloud Functions
+firebase emulators:start          # Local testing
+```
+
+Cloud Functions setup:
+```bash
+cd firebase/functions
+npm install
+npm run build
+```
+
 ## Firestore Schema
 
 Collections: `families`, `devices`, `users`, `whitelist`, `extensionRequests`, `usageLogs`
