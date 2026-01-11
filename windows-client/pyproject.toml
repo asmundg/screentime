@@ -16,6 +16,9 @@ dependencies = [
 [project.scripts]
 screentime = "screentime_windows.main:main"
 
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
 [tool.uv.sources]
 screentime-shared = { path = "../shared", editable = true }
 

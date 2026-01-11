@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Platform(StrEnum):
@@ -31,13 +31,12 @@ class RequestStatus(StrEnum):
 class Family(BaseModel):
     """Firestore: families/{familyId}"""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str
     created_at: datetime
     parent_email: str
     time_tracking_mode: TimeTrackingMode = TimeTrackingMode.UNIFIED
-
-    class Config:
-        populate_by_name = True
 
 
 class Device(BaseModel):
