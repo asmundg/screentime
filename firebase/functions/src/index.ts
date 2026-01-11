@@ -183,17 +183,28 @@ export const lowTimeAlert = onSchedule(
         if (!familyDoc.exists) continue;
 
         const family = familyDoc.data() as Family;
-        if (!family.fcmToken) continue;
+
+        // Get FCM tokens for all admins and owners
+        const tokens: string[] = [];
+        if (family.fcmTokens) {
+          for (const [email, role] of Object.entries(family.members)) {
+            if (role === "owner" || role === "admin") {
+              const token = family.fcmTokens[email];
+              if (token) tokens.push(token);
+            }
+          }
+        }
+        if (tokens.length === 0) continue;
 
         // Check if we already sent this alert today
         const alertKey = `lowTimeAlert_${userDoc.id}_${user.lastResetDate}`;
         const alertDoc = await db.collection("_alerts").doc(alertKey).get();
         if (alertDoc.exists) continue;
 
-        // Send notification
+        // Send notification to all admins/owners
         try {
-          await messaging.send({
-            token: family.fcmToken,
+          await messaging.sendEachForMulticast({
+            tokens,
             notification: {
               title: "Low Screen Time",
               body: `${user.name} has ${Math.round(remaining)} minutes remaining`,
@@ -248,13 +259,15 @@ export const generateRegistrationCode = onCall(
       throw new HttpsError("invalid-argument", "familyId and userId required");
     }
 
-    // Verify caller is parent of this family
+    // Verify caller is admin/owner of this family
     const familyDoc = await db.collection("families").doc(familyId).get();
     if (!familyDoc.exists) {
       throw new HttpsError("not-found", "Family not found");
     }
     const family = familyDoc.data() as Family;
-    if (family.parentEmail !== request.auth.token.email) {
+    const callerEmail = request.auth.token.email as string;
+    const callerRole = family.members[callerEmail];
+    if (!callerRole || (callerRole !== "owner" && callerRole !== "admin")) {
       throw new HttpsError("permission-denied", "Not authorized for this family");
     }
 
