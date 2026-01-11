@@ -1,0 +1,8 @@
+{
+  "device_id": "your-unique-device-id",
+  "device_name": "Gaming PC",
+  "family_id": "your-family-id",
+  "user_id": "your-child-user-id",
+  "firebase_credentials_path": "credentials/firebase-service-account.json",
+  "poll_interval_seconds": 10
+}

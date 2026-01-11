@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+.eggs/
+*.egg-info/
+*.egg
+
+# uv
+uv.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Firebase credentials (NEVER commit these)
+**/credentials/
+**/service-account*.json
+**/firebase-adminsdk*.json
+google-services.json
+
+# Build outputs
+dist/
+build/
+*.spec
+
+# Test/coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Flutter
+parent-app/.dart_tool/
+parent-app/build/
+parent-app/.packages
+
+# Android
+android-child-app/.gradle/
+android-child-app/build/
+android-child-app/local.properties
