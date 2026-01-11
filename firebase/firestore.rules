@@ -71,8 +71,9 @@ service cloud.firestore {
     // ==========================================================================
 
     match /families/{familyId} {
-      // Any member can read
-      allow read: if isMemberOf(familyId);
+      // Any member can read (uses resource.data directly for query compatibility)
+      allow read: if isAuthenticated() &&
+                     request.auth.token.email in resource.data.members.keys();
 
       // Anyone authenticated can create (they become owner)
       allow create: if isAuthenticated() &&
