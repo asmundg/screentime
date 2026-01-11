@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "your-project-id"
-  }
+    "default": "family-screentime-575cf"
+  },
+  "targets": {},
+  "etags": {}
 }

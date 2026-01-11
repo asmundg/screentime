@@ -3,11 +3,27 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ==========================================================================
+    // Allowlist - Only these emails can use the app
+    // ==========================================================================
+
+    function isApprovedUser() {
+      return request.auth.token.email in [
+        // Add approved emails here:
+        "REPLACE_WITH_YOUR_EMAIL@example.com"
+      ];
+    }
+
+    // Devices authenticate with deviceId claim (no email)
+    function isApprovedDevice() {
+      return request.auth.token.deviceId != null;
+    }
+
+    // ==========================================================================
     // Helper Functions
     // ==========================================================================
 
     function isAuthenticated() {
-      return request.auth != null;
+      return request.auth != null && (isApprovedUser() || isApprovedDevice());
     }
 
     function getFamily(familyId) {
