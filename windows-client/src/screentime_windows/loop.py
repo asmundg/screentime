@@ -13,6 +13,7 @@ from .firebase_client import FirestoreClient
 from .lock import lock_workstation
 from .monitor import get_foreground_exe
 from .notify import NotificationState, should_show_warning, show_time_warning
+from .tray import TrayManager
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +38,34 @@ def run_monitoring_loop(
     poll_interval_seconds: int = 10,
     whitelist_refresh_seconds: int = 60,
     cache_dir: Path | None = None,
+    enable_tray: bool = True,
 ) -> None:
     """Run the main monitoring loop. Does not return unless interrupted."""
     state = MonitorState()
     cache = LocalCache(cache_dir or Path.home() / ".screentime" / "cache")
+    stop_requested = False
+
+    def request_extension(minutes: int) -> None:
+        """Callback for extension request from tray."""
+        try:
+            request_id = client.create_extension_request(minutes)
+            logger.info("Created extension request %s for %d minutes", request_id, minutes)
+        except Exception:
+            logger.exception("Failed to create extension request")
+
+    def request_quit() -> None:
+        """Callback for quit from tray."""
+        nonlocal stop_requested
+        stop_requested = True
+
+    # Set up tray icon
+    tray: TrayManager | None = None
+    if enable_tray:
+        tray = TrayManager(
+            on_request_extension=request_extension,
+            on_quit=request_quit,
+        )
+        tray.start()
 
     # Initial load - try online first, fall back to cache
     _initial_sync(client, state, cache)
@@ -52,16 +77,25 @@ def run_monitoring_loop(
         state.is_online,
     )
 
-    while True:
-        try:
-            _tick(client, state, cache, poll_interval_seconds, whitelist_refresh_seconds)
-        except KeyboardInterrupt:
-            logger.info("Monitoring loop interrupted")
-            break
-        except Exception:
-            logger.exception("Error in monitoring loop tick")
+    try:
+        while not stop_requested:
+            try:
+                _tick(client, state, cache, poll_interval_seconds, whitelist_refresh_seconds)
 
-        time.sleep(poll_interval_seconds)
+                # Update tray icon
+                if tray:
+                    _update_tray(tray, state)
+
+            except KeyboardInterrupt:
+                logger.info("Monitoring loop interrupted")
+                break
+            except Exception:
+                logger.exception("Error in monitoring loop tick")
+
+            time.sleep(poll_interval_seconds)
+    finally:
+        if tray:
+            tray.stop()
 
 
 def _initial_sync(
@@ -335,3 +369,22 @@ def _check_time_warnings(state: MonitorState, is_whitelisted: bool) -> None:
     if warning_level is not None:
         if show_time_warning(warning_level, minutes_remaining):
             state.notifications.shown_warnings.add(warning_level)
+
+
+def _update_tray(tray: TrayManager, state: MonitorState) -> None:
+    """Update the system tray icon with current state."""
+    minutes_remaining = state.daily_limit_minutes - state.today_used_minutes
+    is_whitelisted = state.last_foreground_exe is not None and any(
+        item.identifier.lower() == state.last_foreground_exe.lower()
+        for item in state.whitelist
+    )
+
+    tray.update(
+        minutes_remaining=minutes_remaining,
+        minutes_used=state.today_used_minutes,
+        daily_limit=state.daily_limit_minutes,
+        current_app=state.last_foreground_exe,
+        is_whitelisted=is_whitelisted,
+        is_online=state.is_online,
+        whitelist=[item.display_name for item in state.whitelist],
+    )
