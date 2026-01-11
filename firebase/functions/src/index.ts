@@ -1,6 +1,7 @@
 import * as admin from "firebase-admin";
 import {onDocumentCreated} from "firebase-functions/v2/firestore";
 import {onSchedule} from "firebase-functions/v2/scheduler";
+import {onCall, HttpsError} from "firebase-functions/v2/https";
 
 admin.initializeApp();
 
@@ -200,5 +201,168 @@ export const lowTimeAlert = onSchedule(
         }
       }
     }
+  }
+);
+
+// =============================================================================
+// Device Registration & Authentication
+// =============================================================================
+
+interface RegistrationCode {
+  familyId: string;
+  userId: string;
+  createdAt: admin.firestore.Timestamp;
+  expiresAt: admin.firestore.Timestamp;
+  used: boolean;
+}
+
+/**
+ * Generate a registration code for linking a new device.
+ * Called by parent app when adding a new device.
+ */
+export const generateRegistrationCode = onCall(
+  {cors: true},
+  async (request) => {
+    // Must be authenticated as parent
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Must be logged in");
+    }
+
+    const {familyId, userId} = request.data as {familyId: string; userId: string};
+    if (!familyId || !userId) {
+      throw new HttpsError("invalid-argument", "familyId and userId required");
+    }
+
+    // Verify caller is parent of this family
+    const familyDoc = await db.collection("families").doc(familyId).get();
+    if (!familyDoc.exists) {
+      throw new HttpsError("not-found", "Family not found");
+    }
+    const family = familyDoc.data() as Family;
+    if (family.parentEmail !== request.auth.token.email) {
+      throw new HttpsError("permission-denied", "Not authorized for this family");
+    }
+
+    // Generate 6-digit code
+    const code = Math.random().toString().slice(2, 8);
+    const now = admin.firestore.Timestamp.now();
+    const expiresAt = admin.firestore.Timestamp.fromMillis(
+      now.toMillis() + 15 * 60 * 1000 // 15 minutes
+    );
+
+    await db.collection("_registrationCodes").doc(code).set({
+      familyId,
+      userId,
+      createdAt: now,
+      expiresAt,
+      used: false,
+    } as RegistrationCode);
+
+    console.log(`Registration code ${code} created for family ${familyId}`);
+    return {code, expiresAt: expiresAt.toDate().toISOString()};
+  }
+);
+
+/**
+ * Register a device using a registration code.
+ * Called by child device (Windows/Android) during setup.
+ * Returns a custom auth token the device can use.
+ */
+export const registerDevice = onCall(
+  {cors: true},
+  async (request) => {
+    const {code, deviceId, deviceName, platform} = request.data as {
+      code: string;
+      deviceId: string;
+      deviceName: string;
+      platform: "windows" | "android";
+    };
+
+    if (!code || !deviceId || !deviceName || !platform) {
+      throw new HttpsError("invalid-argument", "Missing required fields");
+    }
+
+    // Look up registration code
+    const codeDoc = await db.collection("_registrationCodes").doc(code).get();
+    if (!codeDoc.exists) {
+      throw new HttpsError("not-found", "Invalid registration code");
+    }
+
+    const codeData = codeDoc.data() as RegistrationCode;
+
+    // Check if expired
+    if (codeData.expiresAt.toMillis() < Date.now()) {
+      throw new HttpsError("deadline-exceeded", "Registration code expired");
+    }
+
+    // Check if already used
+    if (codeData.used) {
+      throw new HttpsError("already-exists", "Registration code already used");
+    }
+
+    // Mark code as used
+    await codeDoc.ref.update({used: true});
+
+    // Create device document
+    await db.collection("devices").doc(deviceId).set({
+      familyId: codeData.familyId,
+      userId: codeData.userId,
+      name: deviceName,
+      platform,
+      lastSeen: admin.firestore.FieldValue.serverTimestamp(),
+      currentApp: null,
+      currentAppPackage: null,
+      isLocked: false,
+      fcmToken: null,
+    });
+
+    // Create custom token with device claims
+    const customToken = await admin.auth().createCustomToken(deviceId, {
+      deviceId,
+      familyId: codeData.familyId,
+      userId: codeData.userId,
+      isDevice: true,
+    });
+
+    console.log(`Device ${deviceId} registered to family ${codeData.familyId}`);
+    return {
+      token: customToken,
+      familyId: codeData.familyId,
+      userId: codeData.userId,
+    };
+  }
+);
+
+/**
+ * Refresh a device's auth token.
+ * Called periodically by devices to get a fresh token.
+ */
+export const refreshDeviceToken = onCall(
+  {cors: true},
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Must be authenticated");
+    }
+
+    const deviceId = request.auth.token.deviceId as string | undefined;
+    if (!deviceId) {
+      throw new HttpsError("permission-denied", "Not a device token");
+    }
+
+    // Verify device still exists
+    const deviceDoc = await db.collection("devices").doc(deviceId).get();
+    if (!deviceDoc.exists) {
+      throw new HttpsError("not-found", "Device not found");
+    }
+
+    const device = deviceDoc.data()!;
+    const customToken = await admin.auth().createCustomToken(deviceId, {
+      deviceId,
+      familyId: device.familyId,
+      userId: device.userId,
+      isDevice: true,
+    });
+
+    return {token: customToken};
   }
 );
