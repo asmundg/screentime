@@ -12,6 +12,7 @@ from .cache import LocalCache
 from .firebase_client import FirestoreClient
 from .lock import lock_workstation
 from .monitor import get_foreground_exe
+from .notify import NotificationState, should_show_warning, show_time_warning
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ class MonitorState:
     last_reset_date: str = ""
     is_locked: bool = False
     is_online: bool = True
+    notifications: NotificationState = field(default_factory=NotificationState)
 
 
 def run_monitoring_loop(
@@ -174,6 +176,9 @@ def _tick(
     if state.is_online:
         _check_extension_approvals(client, state)
 
+    # Check for time warnings (only if current app is counting time)
+    _check_time_warnings(state, is_whitelisted)
+
     # Check if limit exceeded
     if state.today_used_minutes >= state.daily_limit_minutes:
         if not state.is_locked:
@@ -309,3 +314,24 @@ def _check_extension_approvals(client: FirestoreClient, state: MonitorState) -> 
             )
     except Exception:
         logger.debug("Failed to check extension approvals")
+
+
+def _check_time_warnings(state: MonitorState, is_whitelisted: bool) -> None:
+    """Check if we should show a time warning notification."""
+    # Reset notification state on new day
+    today = date.today().isoformat()
+    state.notifications.reset_if_new_day(today)
+
+    # Calculate remaining time
+    minutes_remaining = state.daily_limit_minutes - state.today_used_minutes
+
+    # Check if we should show a warning
+    warning_level = should_show_warning(
+        minutes_remaining=minutes_remaining,
+        is_whitelisted=is_whitelisted,
+        state=state.notifications,
+    )
+
+    if warning_level is not None:
+        if show_time_warning(warning_level, minutes_remaining):
+            state.notifications.shown_warnings.add(warning_level)
