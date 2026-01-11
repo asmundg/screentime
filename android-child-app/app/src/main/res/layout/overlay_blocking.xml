@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="#E0E0E0"
+    android:padding="32dp">
+
+    <TextView
+        android:id="@+id/tv_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="⏰ Time's Up!"
+        android:textSize="48sp"
+        android:textStyle="bold"
+        android:textColor="#D32F2F"
+        android:layout_marginBottom="24dp" />
+
+    <TextView
+        android:id="@+id/tv_message"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="You've used your daily screen time.\nSwitch to a whitelisted app or request more time."
+        android:textSize="18sp"
+        android:textAlignment="center"
+        android:textColor="#424242"
+        android:layout_marginBottom="32dp" />
+
+    <Button
+        android:id="@+id/btn_request_extension"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Request Extension"
+        android:textSize="16sp"
+        android:padding="16dp"
+        android:backgroundTint="#1976D2"
+        android:textColor="#FFFFFF" />
+
+</LinearLayout>

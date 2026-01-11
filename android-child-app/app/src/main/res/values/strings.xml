@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Screen Time</string>
+
+    <!-- Accessibility Service -->
+    <string name="accessibility_service_description">
+        Monitors app usage for parental controls. This service detects when you switch apps
+        to track screen time and enforce time limits set by your parents.
+    </string>
+
+    <!-- Device Admin -->
+    <string name="device_admin_label">Screen Time Admin</string>
+    <string name="device_admin_description">
+        Prevents removal of parental controls without parent authorization.
+        This ensures screen time limits remain in effect.
+    </string>
+</resources>
