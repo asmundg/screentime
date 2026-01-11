@@ -28,6 +28,12 @@ class RequestStatus(StrEnum):
     DENIED = "denied"
 
 
+class MemberRole(StrEnum):
+    OWNER = "owner"    # Full control, can delete family, manage members
+    ADMIN = "admin"    # Manage kids, devices, whitelist, approve requests
+    VIEWER = "viewer"  # Read-only dashboard access
+
+
 class Family(BaseModel):
     """Firestore: families/{familyId}"""
 
@@ -35,7 +41,8 @@ class Family(BaseModel):
 
     name: str
     created_at: datetime
-    parent_email: str
+    owner_email: str  # Original creator, cannot be removed
+    members: dict[str, MemberRole]  # email -> role mapping
     time_tracking_mode: TimeTrackingMode = TimeTrackingMode.UNIFIED
 
 

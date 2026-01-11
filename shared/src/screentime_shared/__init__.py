@@ -8,6 +8,7 @@ from .models import (
     Platform,
     TimeTrackingMode,
     RequestStatus,
+    MemberRole,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "Platform",
     "TimeTrackingMode",
     "RequestStatus",
+    "MemberRole",
 ]

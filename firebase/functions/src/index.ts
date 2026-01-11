@@ -20,10 +20,13 @@ interface ExtensionRequest {
   createdAt: admin.firestore.Timestamp;
 }
 
+type MemberRole = "owner" | "admin" | "viewer";
+
 interface Family {
   name: string;
-  parentEmail: string;
-  fcmToken?: string;
+  ownerEmail: string;
+  members: Record<string, MemberRole>;
+  fcmTokens?: Record<string, string>;  // email -> FCM token for each member
 }
 
 interface User {
@@ -34,7 +37,7 @@ interface User {
 }
 
 /**
- * Send push notification to parent when a child requests a time extension.
+ * Send push notification to all admins/owners when a child requests a time extension.
  */
 export const onExtensionRequest = onDocumentCreated(
   "extensionRequests/{requestId}",
@@ -48,7 +51,7 @@ export const onExtensionRequest = onDocumentCreated(
     const request = snapshot.data() as ExtensionRequest;
     console.log(`Extension request created: ${event.params.requestId}`);
 
-    // Get family to find parent's FCM token
+    // Get family
     const familyDoc = await db.collection("families").doc(request.familyId).get();
     if (!familyDoc.exists) {
       console.log(`Family ${request.familyId} not found`);
@@ -56,8 +59,20 @@ export const onExtensionRequest = onDocumentCreated(
     }
 
     const family = familyDoc.data() as Family;
-    if (!family.fcmToken) {
-      console.log(`No FCM token for family ${request.familyId}`);
+
+    // Get FCM tokens for all admins and owners
+    const tokens: string[] = [];
+    if (family.fcmTokens) {
+      for (const [email, role] of Object.entries(family.members)) {
+        if (role === "owner" || role === "admin") {
+          const token = family.fcmTokens[email];
+          if (token) tokens.push(token);
+        }
+      }
+    }
+
+    if (tokens.length === 0) {
+      console.log(`No FCM tokens for admins in family ${request.familyId}`);
       return;
     }
 
@@ -65,9 +80,9 @@ export const onExtensionRequest = onDocumentCreated(
     const userDoc = await db.collection("users").doc(request.userId).get();
     const userName = userDoc.exists ? (userDoc.data() as User).name : "Your child";
 
-    // Send notification
-    const message: admin.messaging.Message = {
-      token: family.fcmToken,
+    // Send notification to all admins/owners
+    const message: admin.messaging.MulticastMessage = {
+      tokens,
       notification: {
         title: "Extension Request",
         body: `${userName} is requesting ${request.requestedMinutes} more minutes`,
@@ -97,10 +112,10 @@ export const onExtensionRequest = onDocumentCreated(
     };
 
     try {
-      await messaging.send(message);
-      console.log(`Notification sent for request ${event.params.requestId}`);
+      const response = await messaging.sendEachForMulticast(message);
+      console.log(`Notifications sent: ${response.successCount} success, ${response.failureCount} failed`);
     } catch (error) {
-      console.error("Error sending notification:", error);
+      console.error("Error sending notifications:", error);
     }
   }
 );
@@ -364,5 +379,159 @@ export const refreshDeviceToken = onCall(
     });
 
     return {token: customToken};
+  }
+);
+
+// =============================================================================
+// Member Management
+// =============================================================================
+
+/**
+ * Add a member to a family.
+ * Only owners can add members.
+ */
+export const addFamilyMember = onCall(
+  {cors: true},
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Must be logged in");
+    }
+
+    const {familyId, email, role} = request.data as {
+      familyId: string;
+      email: string;
+      role: MemberRole;
+    };
+
+    if (!familyId || !email || !role) {
+      throw new HttpsError("invalid-argument", "familyId, email, and role required");
+    }
+
+    if (!["owner", "admin", "viewer"].includes(role)) {
+      throw new HttpsError("invalid-argument", "Invalid role");
+    }
+
+    // Get family and verify caller is owner
+    const familyDoc = await db.collection("families").doc(familyId).get();
+    if (!familyDoc.exists) {
+      throw new HttpsError("not-found", "Family not found");
+    }
+
+    const family = familyDoc.data() as Family;
+    const callerEmail = request.auth.token.email as string;
+
+    if (family.members[callerEmail] !== "owner") {
+      throw new HttpsError("permission-denied", "Only owners can add members");
+    }
+
+    // Add member
+    await familyDoc.ref.update({
+      [`members.${email}`]: role,
+    });
+
+    console.log(`Added ${email} as ${role} to family ${familyId}`);
+    return {success: true};
+  }
+);
+
+/**
+ * Remove a member from a family.
+ * Only owners can remove members. Cannot remove the owner.
+ */
+export const removeFamilyMember = onCall(
+  {cors: true},
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Must be logged in");
+    }
+
+    const {familyId, email} = request.data as {
+      familyId: string;
+      email: string;
+    };
+
+    if (!familyId || !email) {
+      throw new HttpsError("invalid-argument", "familyId and email required");
+    }
+
+    // Get family and verify caller is owner
+    const familyDoc = await db.collection("families").doc(familyId).get();
+    if (!familyDoc.exists) {
+      throw new HttpsError("not-found", "Family not found");
+    }
+
+    const family = familyDoc.data() as Family;
+    const callerEmail = request.auth.token.email as string;
+
+    if (family.members[callerEmail] !== "owner") {
+      throw new HttpsError("permission-denied", "Only owners can remove members");
+    }
+
+    // Cannot remove the owner
+    if (email === family.ownerEmail) {
+      throw new HttpsError("invalid-argument", "Cannot remove the family owner");
+    }
+
+    // Remove member
+    await familyDoc.ref.update({
+      [`members.${email}`]: admin.firestore.FieldValue.delete(),
+      [`fcmTokens.${email}`]: admin.firestore.FieldValue.delete(),
+    });
+
+    console.log(`Removed ${email} from family ${familyId}`);
+    return {success: true};
+  }
+);
+
+/**
+ * Update a member's role.
+ * Only owners can change roles.
+ */
+export const updateMemberRole = onCall(
+  {cors: true},
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Must be logged in");
+    }
+
+    const {familyId, email, role} = request.data as {
+      familyId: string;
+      email: string;
+      role: MemberRole;
+    };
+
+    if (!familyId || !email || !role) {
+      throw new HttpsError("invalid-argument", "familyId, email, and role required");
+    }
+
+    if (!["owner", "admin", "viewer"].includes(role)) {
+      throw new HttpsError("invalid-argument", "Invalid role");
+    }
+
+    // Get family and verify caller is owner
+    const familyDoc = await db.collection("families").doc(familyId).get();
+    if (!familyDoc.exists) {
+      throw new HttpsError("not-found", "Family not found");
+    }
+
+    const family = familyDoc.data() as Family;
+    const callerEmail = request.auth.token.email as string;
+
+    if (family.members[callerEmail] !== "owner") {
+      throw new HttpsError("permission-denied", "Only owners can change roles");
+    }
+
+    // Cannot change owner's role
+    if (email === family.ownerEmail && role !== "owner") {
+      throw new HttpsError("invalid-argument", "Cannot change owner's role");
+    }
+
+    // Update role
+    await familyDoc.ref.update({
+      [`members.${email}`]: role,
+    });
+
+    console.log(`Updated ${email} role to ${role} in family ${familyId}`);
+    return {success: true};
   }
 );
